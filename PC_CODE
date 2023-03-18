@@ -1,0 +1,219 @@
+/*ADPC*/
+
+/*Mapping the variables*/
+data data2;
+set pcdata;
+PARAM=PCTEST;
+PARAMCD=PCTESTCD;
+AVAL=PCSTRESN;
+AVALC=PCSTRESC;
+AVISIT=VISIT;
+AVISITNUM=VISITNUM;
+ATPT=PCTPT;
+ATPTN=PCTPTNUM;
+run;
+/*Deriving TRTA*/
+data analysis.pc_jadhaas4;
+set data2;
+if EPOCH="TREATMENT PERIOD 1" then TRTA=TRT01A;
+if EPOCH="TREATMENT PERIOD 2" then TRTA=TRT02A;
+run;
+
+
+/*TFL*/
+
+
+/*Filtering rows*/
+data b1;
+set analysis.pc_jadhaas4;
+where PCTESTCD="NOV2" and EPOCH="TREATMENT PERIOD 2" and CNINCFL="Y";
+run;
+/*sorting data*/
+proc sort data=b1 out=sort_b1; 
+by TRTA VISITNUM AVISIT ATPTN ATPT ;
+run;
+/*Deriving summary statistics*/
+proc means data=sort_b1 NWAY noprint;
+by TRTA VISITNUM AVISIT ATPTN ATPT ;
+var AVAL;
+output out=table_1 n=n_ mean=Mean_ std=SD_ min=Min_ median=Median_ max=Max_;
+run;
+/*Deriving cv% mean*/
+data b2;
+set table_1; 
+if mean_ > 0 then CV_mean =(SD_/Mean_)*100;
+run;
+/*Deriving geometric mean,CV% geo-mean */
+data b3;
+set sort_b1 ;
+if AVAL>0 then geo=log(AVAL);
+run;
+Proc means data=b3 NWAY noprint;
+by TRTA VISITNUM AVISIT ATPTN ATPT;
+var geo;
+output out=table_2 mean=Mean_ var=var_;
+run;
+data b4;
+set table_2;
+geomean= exp(mean_);
+cv_geo_mean =(sqrt (exp(var_)-1) * 100);
+drop Mean_ var_; 
+run;
+/*Merging geomean cv_geo_mean with summary statistics */
+proc sql ;
+create table final_1 as
+select a.*,b.geomean, b.cv_geo_mean
+from B2 as a full join B4 as b
+on a.TRTA=b.TRTA and a.ATPT=b.ATPT and a.AVISIT=b.AVISIT
+order by TRTA, VISITNUM, AVISIT, ATPTN, ATPT; 
+quit;
+/*Converting numeric to character*/
+data table_4;
+set final_1 ;
+N=compress(put(n_,4.));
+ Mean=put(Mean_,7.1);
+ SD=put(SD_,7.2);
+ PC Page 2 
+ SD=put(SD_,7.2);
+ Min=put(Min_,7.2);
+Median=put(Median_,6.3);
+Max=put(Max_,7.2);
+CV__Mean= strip(put(CV_Mean,8.2));
+geo_mean= strip(put(geomean,8.2));
+cv__geo__mean= strip(put(cv_geo_mean,8.2));
+mean_sd= STRIP(Mean)||" ("||STRIP(SD)||")";
+min_max="[" ||STRIP(Min)|| "; " ||STRIP(Max)|| "]";
+drop n_ Mean_ SD_ Min_ Median_ Max_ CV_Mean geomean cv_geo_mean; 
+run;
+/*Transposing */
+proc transpose data=table_4 out=tfl_transpose;
+var N mean_sd CV__Mean geo_mean cv__geo__mean Median min_max;
+by TRTA VISITNUM AVISIT ATPTN ATPT ;
+run;
+/*Renaming values*/
+data tfl_transpose1;
+set tfl_transpose;
+by TRTA VISITNUM AVISIT ATPTN ATPT ;
+if _NAME_="N" then _NAME_="n";
+if _NAME_="mean_sd" then _NAME_="Mean (SD)";
+if _NAME_="CV__Mean" then _NAME_="CV% mean";
+if _NAME_="geo_mean" then _NAME_="Geo-mean ";
+if _NAME_="cv__geo__mean" then _NAME_="CV% geo-mean";
+if _NAME_="Median" then _NAME_="Median";
+if _NAME_="min_max" then _NAME_="[Min;Max]";
+if TRTA=" P2: Once daily dose of NOV123 150mg Day 8 to 12" then TRTA="Multiple Dose: 
+150mg";
+if TRTA=" P2: Once daily dose of NOV123 450mg Day 8 to 12" then TRTA="Multiple Dose: 
+450mg";
+if first.TRTA=0 then TRTA="";
+if first.AVISIT=0 then AVISIT="";
+If first.ATPT=0 then ATPT=""; 
+if first.ATPT=1 then ord+1;
+run;
+
+/*Making Report*/
+proc report data= tfl_transpose1 nowd headline split='*';
+column (TRTA AVISIT ATPT _NAME_ COL1 ord);
+define ord/ordr noprint;
+break after ord/skip;
+define TRTA/ width=30"Treatment";
+define AVISIT/width=15 "Analysis visit";
+define ATPT/ width=21 "Scheduled timepoint";
+define _NAME_/width=13 "Statistics";
+define COL1/width=20 "Concentration*(ng/mL)";
+compute before _page_ / left;
+line @01 "Compound: NOV123, Analyte: NOV2 metabolite, Matrix: Plasma";
+endcomp;
+run;
+
+/*GRAPH*/
+
+
+/*Filtering rows*/
+data a1;
+set analysis.pc_jadhaas4;
+where PCTESTCD="NOV2" and EPOCH="TREATMENT PERIOD 2" and CNINCFL="Y";
+run;
+/*sorting data*/
+proc sort data=a1 out=sort_a1; 
+by TRTA VISITNUM AVISIT ATPTN ATPT ;
+run;
+/*Deriving summary statistics*/
+proc means data=sort_a1 NWAY noprint;
+by TRTA VISITNUM AVISIT ATPTN ATPT ;
+var AVAL;
+output out=table_1 n=n_ mean=Mean_ std=SD_ min=Min_ median=Median_ max=Max_;
+run;
+/*Deriving cv% mean*/
+data b1;
+set table_1; 
+if mean_ > 0 then CV_mean =(SD_/Mean_)*100;
+run;
+/*Deriving geometric mean,CV% geo-mean */
+data b2;
+set sort_a1 ;
+if AVAL>0 then geo=log(AVAL);
+run;
+Proc means data=b2 NWAY noprint;
+by TRTA VISITNUM AVISIT ATPTN ATPT;
+var geo;
+output out=table_2 mean=Mean_ var=var_;
+run;
+data new;
+set table_2;
+if mean_= . then mean_=0;
+run;
+/*Creating MeanplusSD MeanminusSD*/
+data plot1;
+set table_1;
+meanplussd= Mean_+SD_;
+meanminussd= Mean_-SD_;
+ PC Page 4 
+meanminussd= Mean_-SD_;
+if TRTA=" P2: Once daily dose of NOV123 150mg Day 8 to 12" then TRTA="Multiple Dose of NOV2: 
+150mg";
+if TRTA=" P2: Once daily dose of NOV123 450mg Day 8 to 12" then TRTA="Multiple Dose of NOV2: 
+450mg";
+run;
+/*Changing the TRTA value*/
+data plot2;
+set table_2 ;
+if TRTA=" P2: Once daily dose of NOV123 150mg Day 8 to 12" then TRTA="Multiple Dose of NOV2: 
+150mg";
+if TRTA=" P2: Once daily dose of NOV123 450mg Day 8 to 12" then TRTA="Multiple Dose of NOV2: 
+450mg";
+run;
+/*Creating linear view graph*/
+ods rtf file="/vob/CSRTRAIN/CSRTRAININ/csr_18/reports/pkpd/plot_pc.rtf";
+proc sgplot data=plot1;
+title1 j=c "Arithmetic mean (SD) plasma concentration (ng/mL) of NOV2(multiple dose) versus time by 
+treatment (PK Analysis set)";
+title2 " ";
+title3 "Compound: NOV123, Analyte: NOV2 metabolite, Matrix: Plasma";
+scatter x=ATPTN y=Mean_ /group=TRTA markerattrs=(size=5px) yerrorupper=meanplussd 
+yerrorlower=meanminussd ; 
+series x=ATPTN y=Mean_/markers group=TRTA markerattrs=(size=5px)Name="Plot";
+xaxis values=(0 12 24 36 48 60 72 84 96 108 120 132) label="Hours post dose" 
+labelattrs=(WEIGHT=BOLD) valueattrs=(WEIGHT=BOLD);
+yaxis label="NOV2 plasma concentration (ng/mL)" labelattrs=(WEIGHT=BOLD) 
+valueattrs=(WEIGHT=BOLD);
+Keylegend "Plot"/Title="Treatment" Titleattrs=(WEIGHT=BOLD) location= outside position=bottom 
+across=1;
+inset "Linear view"/position=topright border;
+run;
+/*Creating semi-logarithmic view graph */
+proc sgplot data=plot2;
+title1 j=c "Log of Arithmetic mean (SD) plasma concentration (ng/mL) of NOV2(multiple dose) versus time 
+by treatment (PK Analysis set)";
+title2 " ";
+title3 "Compound: NOV123, Analyte: NOV2 metabolite, Matrix: Plasma";
+series x=ATPTN y=Mean_/markers group=TRTA markerattrs=(size=10px);
+xaxis values=(0 12 24 36 48 60 72 84 96 108 120 132) label="Hours post dose" 
+labelattrs=(WEIGHT=BOLD) valueattrs=(WEIGHT=BOLD);
+yaxis label="NOV2 plasma concentration (ng/mL)" labelattrs=(WEIGHT=BOLD) 
+valueattrs=(WEIGHT=BOLD);
+Keylegend/Title="Treatment" Titleattrs=(WEIGHT=BOLD) location= outside position=bottom across=1;
+inset "semi-logarithmic view"/position=topright border;
+run;
+ods rtf close;
+

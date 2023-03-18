@@ -1,0 +1,258 @@
+/*VS SDTM*/
+
+data v1;
+set data_s.vs;
+keep STUDYID DOMAIN USUBJID VSGRPID VSTESTCD VSTEST VSPOS VSORRES 
+VSORRESU VSSTRESC VSSTRESN 
+VSSTRESU VISITNUM VISIT EPOCH VSDTC;
+run;
+/*sorting vs */
+proc sort data=v1 out=sort_vs;
+by usubjid vstest vspos visitnum;
+run;
+/*Deriving VS sequence number*/
+data v2;
+set sort_vs;
+by USUBJID;
+if vsorres ne " ";
+where vstestcd in ("SYSBP","DIABP");
+if first.usubjid=1 then VSSEQ=1;
+else VSSEQ+1;
+run;
+/*sorting trial visit for visitdy*/
+proc sort data=data_s.tv out=sort_tv nodupkey;
+by VISITNUM CPEVENT VISITDY;
+run;
+/*deriving VSDY*/
+proc sql;
+create table v3 as 
+select v2.*,a.rfstdtc
+from v2 as b left join derived.dm_jadhaas4 as a
+on v2.USUBJID=a.USUBJID;
+quit;
+data v4;
+set v3;
+if input(scan(VSDTC,1,"T"),yymmdd10.) >= input(scan(rfstdtc,1,"T"),yymmdd10.)
+then vsdy=(input(scan(VSDTC,1,"T"),yymmdd10.)-input(scan(rfstdtc,1,"T"),yymmdd10.))+1;
+else if input(scan(VSDTC,1,"T"),yymmdd10.) < input(scan(rfstdtc,1,"T"),yymmdd10.) 
+then vsdy=input(scan(VSDTC,1,"T"),yymmdd10.)-input(scan(rfstdtc,1,"T"),yymmdd10.);
+run;
+proc sql;
+create table v5 as
+select a.*,b.VISITDY
+from v4 as a join sort_tv as b
+on a.visitnum = b.visitnum
+order by USUBJID,VSSEQ;
+quit;
+/*final merge of all the dervied variables*/
+data derived.vs_jadhaas4;
+retain STUDYID DOMAIN USUBJID VSSEQ VSGRPID VSTESTCD VSTEST VSPOS VSORRES 
+VSORRESU VSSTRESC VSSTRESN VSSTRESU
+ VISITNUM VISIT EPOCH VSDTC VISITDY VSDY;
+set v5;
+keep STUDYID DOMAIN USUBJID VSSEQ VSGRPID VSTESTCD VSTEST VSPOS VSORRES 
+VSORRESU VSSTRESC VSSTRESN VSSTRESU
+ VISITNUM VISIT EPOCH VSDTC VISITDY VSDY;
+drop rfstdtc;
+run;
+VS SDTM
+Thursday, February 23, 2023 10:36 AM
+ VS Page 1 
+run;
+
+/*ADVS*/
+
+/*sorting vs*/
+proc sort data=derived.vs_jadhaas4 out=sort_vs;
+where VSTESTCD="SYSBP" and VSPOS="SITTING";
+by USUBJID VSTESTCD VISIT VSGRPID;
+run;
+/*filtering*/
+data a2;
+set sort_vs;
+by USUBJID VSTESTCD VISIT VSGRPID;
+if first.VSGRPID;
+run;
+/*deriving param paramcd aaseq avisit*/
+data a3;
+set a2;
+format AVAL 7.2;
+param=catx(" ",vstest,"(",strip(VSSTRESU),")","-",VSPOS);
+paramcd=cats(vstestcd,substr(vspos,1,2));
+ASEQ=VSSEQ;
+AVAL=VSSTRESN;
+run;
+/*calculating average*/
+proc sql;
+create table a4 as
+select *, 
+count(distinct vsgrpid) as counts,
+case
+when calculated counts>1 then avg(vsstresn)
+end as averagevss format=7.2 
+from a3
+group by usubjid, visit;
+quit;
+/*Deriving aval and DTYPE*/
+data b1;
+set a4;
+by usubjid;
+if counts>1 then do;
+aval= averagevss;
+DTYPE="Average";
+end;
+if first.usubjid and counts>1;
+run;
+/*Merging tables*/
+data b2;
+set a4 b1;
+drop averagevss; 
+run;
+/*Sorting by usubjid avisit*/
+proc sort data=b2 out=sort_b2;
+by usubjid visit;
+run;
+/*making vssgrpid blank wherever there is average*/
+data finalavg;
+set sort_b2;
+if DTYPE="Average" then vsgrpid=" ";
+run;
+/*merging above finalavg with dm_sdtm*/
+proc sql;
+create table c1 as
+select a.*, 
+ b.rfstdtc,actarmcd,
+ VS Page 2 
+ b.rfstdtc,actarmcd,
+ input(RFSTDTC,ymddttm16.)-input(vsdtc,ymddttm16.) as Diff,
+case when 
+calculated Diff>0 then calculated diff
+end as diff_
+from finalavg as a join derived.dm_jadhaas4 as b
+on a.usubjid=b.usubjid
+;
+quit;
+/*deriving ablfl*/
+proc sql;
+create table d1 as
+select *,
+case 
+when counts=1 and diff_= min(diff_) and actarmcd ne "SCRNFAIL" then "Y"
+when counts>1 and diff_=min(diff_)and DTYPE="Average" and actarmcd ne "SCRNFAIL" then 
+"Y"
+end as ABLFL
+From c1
+where actarmcd ne "SCRNFAIL"
+group by usubjid
+order by usubjid,VISIT, VSGRPID
+;
+quit;
+/*Deriving base change PCHG*/
+data e1;
+set d1;
+by usubjid;
+retain base;
+if ABLFL="Y" then base=AVAL;
+if first.usubjid and ABLFL=" " then base=.;
+if ABLFL="Y" then AVISIT=VISIT;
+CHG=Aval-base;
+PCHG=((Aval-base)/base)*100;
+run;
+/*final vs advs table*/
+data analysis.advs_jadhaas4;
+retain STUDYID DOMAIN USUBJID VSSEQ VSGRPID VSTESTCD VSTEST VSPOS 
+VSORRES
+VSORRESU VSSTRESC VSSTRESN VSSTRESU VISITNUM VISIT EPOCH VSDTC VISITDY 
+VSDY AVISIT PARAM
+PARAMCD AVAL BASE CHG PCHG DTYPE ABLFL;
+set e1;
+keep STUDYID DOMAIN USUBJID VSSEQ VSGRPID VSTESTCD VSTEST VSPOS 
+VSORRES
+VSORRESU VSSTRESC VSSTRESN VSSTRESU VISITNUM VISIT EPOCH VSDTC VISITDY 
+VSDY AVISIT PARAM
+PARAMCD AVAL BASE CHG PCHG DTYPE ABLFL;
+run;
+
+/*TFL VS*/
+
+
+proc datasets lib=work kill;
+/*merging adsl dm and advs*/
+proc sql;
+create table a1 as
+select a.*,b.actarmcd,
+count(distinct vsgrpid) as count_,
+case
+when calculated count_=1 then "Y"
+when calculated count_>1 and DTYPE="Average" then "Y"
+end as flag
+from analysis.advs_jadhaas4 as a left join analysis.adsl_jadhaas4 as b
+on a.usubjid=b.usubjid
+group by a.USUBJID,a.PARAM,a.visit
+having calculated FLAG eq "Y"
+order by a.PARAM,a.visit,a.visitnum,b.ACTARMCD;
+ VS Page 3 
+order by a.PARAM,a.visit,a.visitnum,b.ACTARMCD;
+quit;
+/*deriving n mean std min median max*/
+proc means data=a1 nway noprint;
+var aval;
+by param visit visitnum ACTARMCD;
+output out=final n=_n mean=_Mean std=_SD min=_Min median=_Median max=_Max;
+run;
+/*converting values to numeric*/
+data final1;
+set final;
+n=put(_n,3.);
+mean=put(_Mean,6.2);
+SD=put(_SD,7.3);
+Minimum=put(_Min,5.1);
+Median=put(_Median,6.2);
+Maximum=put(_Max,6.1);
+run;
+/*sorting data*/
+proc sort data=final1 out=final2;
+by param visitnum visit;
+run;
+/*transposing data*/
+proc transpose data=final2 out=final3;
+id ACTARMCD;
+var n Mean SD Minimum Median Maximum;
+by param visitnum visit;
+run;
+/*sorting data*/
+data final4;
+set final3;
+by param visitnum visit;
+if first.visit=0 then visit=" ";
+if first.visit=0 then param=" ";
+if first.visit=1 then order+1;
+drop VISITNUM;
+run;
+/*calculating capital N*/
+proc freq data=derived.dm_jadhaas4 noprint;
+tables ACTARMCD/ out=N1;
+run;
+/*transposing N1 data*/
+proc transpose data=N1 out=N1_;
+id ACTARMCD;
+var count;
+run;
+/*Creating macros*/
+data N2;
+set N1_;
+ call symputx ("N1",T01);
+ call symputx("N2",T02);
+run;
+/*making report*/
+%u_prerep(prp_id=PTL0003,prp_csvfile=TrakData_jadhaas4);
+proc report data=final4 nowd headline split='*';
+column(PARAM VISIT _NAME_ T01 T02 order);
+define order/order noprint;
+break after order/skip;
+define PARAM/width=46'Parameter (unit)';
+define VISIT/width=11 "Visit";
+define _NAME_/width=15 "Statistics";
+define T01/width=15 "Group 1*N=&N1";
+define T02/width=15 "Group 2*N=&N2";
+run;

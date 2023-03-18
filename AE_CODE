@@ -1,0 +1,342 @@
+/*SDTM AE*/
+/*sorting ae sourcedata*/
+proc sort data=data_s.ae out=sort_ae;
+by USUBJID AETERM AESTDTC AEDECOD;
+where AEYN_STD eq "Y";
+run;
+data ae1;
+set sort_ae;
+keep STUDYID DOMAIN USUBJID AESPID AETERM AELLT AELLTCD AEDECOD AEPTCD 
+AEHLT AEHLTCD AEHLGTCD AEHLGT
+ AECAT AEBODSYS AEBDSYCD AESOC AESOCCD AESEV AESER AEACN AEREL 
+AEOUT AESCONG AESDISAB AESDTH AESHOSP AESLIFE
+ AESMIE AECONTRT AESTDTC AEENDTC;
+run;
+/*Deriving AESEQ*/
+data ae2;
+set sort_ae;
+by USUBJID;
+if first.usubjid=1 then AESEQ=1;
+AESEQ+1;
+keep STUDYID USUBJID AETERM AESEQ ;
+run;
+/*Deriving AESTDY and AEENDY*/
+data ae3;
+merge sort_ae(in=a) analysis.adsl_jadhaas4;
+by usubjid;
+keep USUBJID RFSTDTC RFENDTC AESTDTC AEENDTC TRTSDT TRTEDT;
+if a;
+run;
+data ae4;
+set ae3;
+AESTDTC1=input(AESTDTC,YYMMDD10.);
+AEENDTC1=input(AEENDTC,YYMMDD10.);
+AESTDY= intck("day",TRTSDT,AESTDTC1,"d")+1;
+AEENDY=intck("day",TRTSDT,AEENDTC1,"d")+1;
+keep USUBJID RFSTDTC RFENDTC AESTDY AEENDY TRTSDT TRTEDT;
+run;
+data ae5;
+set ae3;
+AESTDTC_=input(AESTDTC,YYMMDD10.);
+if AESTDTC_ >= TRTSDT then AETRTEM= "Y";
+else AETRTEM= "N";
+drop AESTDTC_;
+run;
+/*final merging of all datasets*/
+data derived.ae_jadhaas4;
+retain STUDYID DOMAIN USUBJID AESEQ AESPID AETERM AELLT AELLTCD AEDECOD 
+AEPTCD AEHLT AEHLTCD AEHLGT AEHLGTCD
+AECAT AEBODSYS AEBDSYCD AESOC AESOCCD
+AESEV AESER AEACN AEREL AEOUT AESCONG AESDISAB AESDTH AESHOSP AESLIFE 
+AESMIE AECONTRT AESTDTC AEENDTC AESTDY AEENDY AETRTM;
+merge ae1(in=a) ae2 ae3 ae4 ae5;
+SDTM AE
+Thursday, February 23, 2023 10:29 AM
+ AE Page 1 
+merge ae1(in=a) ae2 ae3 ae4 ae5;
+keep STUDYID DOMAIN USUBJID AESEQ AESPID AETERM AELLT AELLTCD AEDECOD 
+AEPTCD AEHLT AEHLTCD AEHLGT AEHLGTCD
+AECAT AEBODSYS AEBDSYCD AESOC AESOCCD
+AESEV AESER AEACN AEREL AEOUT AESCONG AESDISAB AESDTH AESHOSP AESLIFE 
+AESMIE AECONTRT AESTDTC AEENDTC AESTDY AEENDY AETRTM;
+if a;
+run;
+
+
+
+
+/*ADAE*/
+
+
+/*Merging adsl dm and sdtm ae*/
+data a;
+merge analysis.adsl_jadhaas4(keep= usubjid TRT01AN TRT02AN TR01SDT TR01EDT 
+TR02SDT TR02EDT) derived.ae_jadhaas4;
+by usubjid;
+run;
+/*Deriving APERIOD*/
+data analysis.adae_jadhaas4;
+set a;
+AESTDTC_=INPUT(AESTDTC,yymmdd10.);
+if TR01SDT<=AESTDTC_<=TR01EDT then do;
+if TRT01AN=1 then APERIOD=1;
+if TRT01AN=2 then APERIOD=3;
+end;
+if TR02SDT <= AESTDTC_ and TR02SDT ne . then do;
+if TRT02AN=1 then APERIOD=2;
+if TRT02AN=2 then APERIOD=4;
+end;
+drop AESTDTC_;
+if APeriod ne .;
+drop TRT01AN TRT02AN TR01SDT TR01EDT TR02SDT TR02EDT;
+run;
+
+
+/*LISTINGS*/
+
+proc datasets lib=work kill;
+
+/*Country/Subject identifier Age/Sex/Race*/
+data a1;
+set derived.dm_jadhaas4;
+age_=CATS(Age,"/",Sex,"/",Race);
+country_=CATS(Country,"/",SUBJID);
+ACTARM1_1=scan(ACTARM,5," ");
+ACTARM1_2=scan(ACTARM,6," ");
+ACTARM1=catx(" ",ACTARM1_1,ACTARM1_2);
+keep usubjid age_ country_ ACTARM1;
+run;
+/*deriving severity casuality action_taken_with_med med_or_ther_taken outcome*/
+ AE Page 4 
+/*deriving severity casuality action_taken_with_med med_or_ther_taken outcome*/
+data a2;
+set derived.ae_jadhaas4;
+col4=CATX("/",AETERM,AEDECOD,AEBODSYS);
+if AESER="N" then SAE="No";
+else SAE="Yes";
+if AESEV="MILD" then severity="MILD";
+if AESEV="MODERATE" then severity="MOD";
+if AESEV="SEVERE" then Severity="SEV";
+if AEREL="NOT RELATED" then Causality=1;
+if AEREL="RELATED" then Causality=2;
+if AEREL="Yes, investigational treatment" then Causality=3;
+if AEREL="Yes, other study treatment (non-investigational)" then Causality=4;
+if AEREL="Yes, both and/or indistinguishable" then Causality=5;
+if AEACN="NOT APPLICABLE" then Action_taken_with_med=999;
+else if AEACN="DRUG WITHDRAWN" then Action_taken_with_med=4;
+else if AEACN="DOSE NOT CHANGED" then Action_taken_with_med=1;
+else if AEACN="Dose adjusted" then Action_taken_with_med=2;
+else if AEACN="Temporarily interrupted" then Action_taken_with_med=3;
+else if AEACN="Unknown" then Action_taken_with_med=997;
+if AECONTRT="N" then Med_or_ther_taken=1; 
+else if AECONTRT="Y" then Med_or_ther_taken=10;
+if AEOUT="RECOVERED/RESOLVED" then outcome=2;
+else if AEOUT="Not recovered/not resolved" then outcome=1;
+else if AEOUT="recovering/resolving" then outcome=3;
+else if AEOUT="recovered/resolved with sequelae" then outcome=4;
+else if AEOUT="Fatal" then outcome=5;
+else if AEOUT="Unknown" then outcome=997;
+keep usubjid col4 SAE severity Causality Action_taken_with_med Med_or_ther_taken outcome 
+AESTDTC AEENDTC;
+run;
+/*Merging a1 and a2 */
+data a3;
+merge a1 a2;
+by usubjid;
+if outcome ne .;
+run;
+/*sorting ec*/
+proc sort data=data_s.ec out=sort_ec;
+by usubjid ecstdtc;
+run;
+/*sorting adae*/
+proc sort data=analysis.adae_jadhaas4 out=sort_adae;
+by usubjid aeterm aestdtc;
+run;
+/*Merging sorted ec and sorted adae*/
+proc sql;
+create table lastcol(keep= AETERM USUBJID AESTDTC ECSTDTC) as
+select *
+from sort_adae join sort_ec(rename=(STUDYID=STUDYID_ DOMAIN=DOMAIN_ 
+USUBJID=USUBJID_))
+on sort_adae.USUBJID=sort_ec.USUBJID_;
+quit;
+proc sort data=lastcol out=sort_lastcol;
+by usubjid aeterm aestdtc;
+run;
+/*deriving date of most recent dose*/
+data lastcol1;
+set sort_lastcol;
+by USUBJID aeterm;
+ AE Page 5 
+by USUBJID aeterm;
+retain dose;
+format ECSTDTC1 AESTDTC1 dose E8601DA10.;
+ECSTDTC1=input(scan(ECSTDTC,1,"T"),yymmdd10.);
+AESTDTC1=input(AESTDTC,yymmdd10.);
+if AESTDTC1 NE .;
+if AESTDTC1>=ECSTDTC1 then dose=ECSTDTC1;
+if last.aeterm;
+run;
+/*Merging all the required variables*/
+data a4;
+merge a3 lastcol1;
+by usubjid;
+keep ACTARM1 age_ country_ SAE col4 AESTDTC AEENDTC severity Causality 
+Action_taken_with_med Med_or_ther_taken outcome dose ;
+run;
+%u_prerep(prp_id=PLL0001,prp_csvfile=TrakData_jadhaas4);
+/*Making report*/
+proc report data=a4 nowd headline split='*';
+column (ACTARM1 country_ age_ SAE col4 AESTDTC AEENDTC Severity Causality 
+Action_taken_with_med Med_or_ther_taken outcome dose);
+define ACTARM1/ order noprint;
+define country_/flow width=8 "Country/*Subject*Identifier" ;
+define age_ /flow width=5'Age/*Sex/*Race';
+define SAE/flow width=5 "SAE";
+define col4/flow width=12 "Reported*term*Preferred*term*System*organ*class";
+define AESTDTC/flow width=8 "Start*date/*day";
+define AEENDTC/flow width=8 "End*date/day";
+define Severity/flow width=6 "Severity";
+define Causality/flow width=4 "Causality";
+define Action_taken_with_med/flow width=6"Action taken with med.";
+define Med_or_ther_taken/flow width=6 "Med or*ther.*taken";
+define outcome/flow width=7"Outcome";
+define dose/flow width=8"Date/time of most recent dose";
+break after ACTARM1 / page;
+compute before _page_ / left;
+line 'by treatment ' ACTARM1 $60.;
+endcomp;
+run;
+
+
+/*TFL*/
+
+options validvarname=v7;
+/*Duplicating data*/
+data n1;
+set analysis.adae_jadhaas4 analysis.adae_jadhaas4;
+run;
+data n2;
+set n1;
+APERIOD_= put(APERIOD,best12.);
+if _n_ gt 11 then APERIOD_="Total";
+run;
+/*Creating table*/
+ AE Page 6 
+/*Creating table*/
+proc sql;
+create table count as
+select APERIOD_, count(distinct USUBJID) as COUNT
+from n2
+group by APERIOD_;
+create table AEBODSYS as
+select APERIOD_, AEBODSYS, count(distinct USUBJID) as COUNT 
+from n2
+group by APERIOD_, AEBODSYS;
+create table AEDECOD as
+select APERIOD_, AEBODSYS, AEDECOD, count(distinct USUBJID) as COUNT 
+from n2
+group by APERIOD_, AEBODSYS, AEDECOD;
+quit;
+/*merging tables*/
+data tlfmerge;
+set count aebodsys aedecod;
+run;
+/*sorting merged data*/
+proc sort data=tlfmerge out=tlf1;
+by AEBODSYS AEDECOD;
+run;
+/*transposinfg data*/
+proc transpose data=tlf1 out=tlf2;
+id APERIOD_;
+by AEBODSYS AEDECOD;
+var COUNT;
+run;
+data count1;
+set count;
+ord=1;
+run;
+data row1 (drop=_NAME_);
+set tlf2;
+if AEBODSYS=" " then AEBODSYS="Number of subjects with at least on AE";
+run;
+data break;
+set row1;
+IF AEBODSYS ne " " and AEDECOD eq " " then ord+1;
+run;
+/*making aedecod under aebodsys*/
+data row2;
+set break;
+if AEDECOD=" " then AEDECOD=AEBODSYS;
+else AEDECOD=" "||AEDECOD;
+drop AEBODSYS;
+run;
+/*Inserting 0 */
+data row3;
+set row2;
+if _1=. then _1=0;
+if _2=. then _2=0;
+if _3=. then _3=0;
+if _4=. then _4=0;
+run;
+/*Duplicate */
+data dup1;
+set analysis.adsl_jadhaas4;
+if TRT01AN=1 then TRT=1;
+if TRT01AN=2 then TRT=3;
+output;
+if TRT02AN=1 then TRT=2;
+ AE Page 7 
+if TRT02AN=1 then TRT=2;
+if TRT02AN=2 then TRT=4;
+output;
+if TRT01AN ne " " then TRT=5;
+output;
+run;
+proc sql;
+create table dup2 as
+select TRT, count(distinct USUBJID) as COUNT
+from dup1
+group by TRT;
+data dup3;
+set dup2;
+if TRT NE .;
+run;
+/*Macro */
+data dup4;
+set dup3;
+call symputx(cats("N",_n_),strip(COUNT));
+run;
+data percent;
+set row3;
+format p1 p2 p3 p3 p4 p5 4.2;
+p1=_1/&N1*100;
+p2=_2/&N2*100;
+p3=_3/&N3*100;
+p4=_4/&N4*100;
+p5=Total/&N5*100;
+run;
+data cat;
+set percent;
+call1=CATS(_1,"(",round(P1,.1),")");
+call2=CATS(_2,"(",round(P2,.1),")");
+call3=CATS(_3,"(",round(P3,.1),")");
+call4=CATS(_4,"(",round(P4,.1),")");
+call5=CATS(Total,"(",round(P5,.1),")");
+drop _1 _2 _3 _4 Total p1 p2 p3 p4 p5;
+run;
+%u_prerep(prp_id=PTL0002,prp_csvfile=TrakData_jadhaas4);
+/*Report*/;
+proc report data=cat nowd headline split='*';
+column AEDECOD ("QAW039" call1 call2 call3 call4 call5 ord);
+define ord/order noprint;
+break after ord/skip;
+define AEDECOD/width=46'Primary system organ class*Preferred term';
+define call1/width=11 "150 mg s.d.* N=&N1*n (%)";
+define call2/width=11 "150 mg m.d.*N=&N2*n (%)";
+define call3/width=11 "450 mg s.d.*N=&N3*n (%)";
+define call4/width=11 "450 mg m.d.*N=&N4*n (%)";
+define call5/width=11 "Total*N=&N5*n (%)";
+run;
+%u_postrep;
